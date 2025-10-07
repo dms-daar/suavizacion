@@ -7,6 +7,20 @@ import os
 import pywintypes
 
 
+def getDmFileType():
+    oDmTable = win32com.client.Dispatch("DmFile.DmTable")
+    strDMext = ".dm"
+    try:
+        oDmTable.DefaultDatamineFormat
+        strDMext = ".dmx"
+    except Exception as e:
+        pass 
+    return strDMext
+ 
+
+DMEXT = getDmFileType()
+
+
 def get_oDmApp(app="StudioRM"): 
 
     oDmApp = None
@@ -31,8 +45,8 @@ def get_dm_table(table, oDmApp):
 
     project_folder = oDmApp.ActiveProject.Folder
 
-    table_path = f"{project_folder}\{table}.dm" 
-    assert  os.path.exists(table_path), f"Table {table}.dm does not exist"
+    table_path = f"{project_folder}\{table}{DMEXT}" 
+    assert  os.path.exists(table_path), f"Table {table}{DMEXT} does not exist"
 
     path = rf"C:\temp\temp0.csv"
     if os.path.exists(path): os.remove(path)
