@@ -576,3 +576,194 @@ def suavizar_batched_xyz_multi(
     log("3D multi-radius KDTree smoothing complete.")
     return df
 
+
+def suavizar_batched_xyz_multi_stable(
+    df: pd.DataFrame,
+    col: str,
+    dists,                 # e.g. [10, 20, 30]
+    out_cols,              # e.g. ["SVOL_10", "SVOL_20", "SVOL_30"]
+    x_size: float,
+    y_size: float,
+    z_size: float,
+    *,
+    leafsize: int = 64,
+    progress_every: int = 10000,
+    core_batch: int = 50000,       # process core points in chunks to cap peak RAM
+    prefer_bincount: bool = True,  # switch to False if your categories are extremely many
+    log=lambda msg: None,
+):
+    """
+    3D tile-wise KDTree smoothing (X×Y×Z) for multiple radii, optimized for memory.
+
+    Key stability tactics:
+      - One KDTree per tile built on expanded region (± max(dists)).
+      - Process core points in batches (core_batch).
+      - For each radius, query neighbors for the current batch only, compute modes, write, discard.
+      - Factorize `col` to integer codes once; compute modes on small int arrays.
+      - No pandas per-row allocations.
+
+    Ties in mode -> pick the **largest** value (max-on-tie), matching your earlier behavior.
+    """
+    # ---- Validation ----
+    if not (len(dists) == len(out_cols) and len(dists) > 0):
+        raise ValueError("dists and out_cols must have the same nonzero length")
+    if not all(s > 0 for s in (x_size, y_size, z_size)):
+        raise ValueError("x_size, y_size, and z_size must be > 0")
+    for k in ("XC", "YC", "ZC", col):
+        if k not in df.columns:
+            raise KeyError(f'missing required column "{k}"')
+
+    # Ensure outputs exist
+    for oc in out_cols:
+        if oc not in df.columns:
+            df[oc] = np.nan
+
+    # ---- Memory-lean views ----
+    x = df["XC"].to_numpy(dtype=np.float32, copy=False)
+    y = df["YC"].to_numpy(dtype=np.float32, copy=False)
+    z = df["ZC"].to_numpy(dtype=np.float32, copy=False)
+
+    # Factorize values -> integer codes (NaN -> -1)
+    codes, uniques = pd.factorize(df[col].to_numpy(), sort=False)
+    codes = codes.astype(np.int64, copy=False)   # bincount needs non-negative; we'll filter -1
+    n_uniques = int(len(uniques))
+
+    # Bounds and overlap
+    xmin, xmax = float(np.nanmin(x)), float(np.nanmax(x))
+    ymin, ymax = float(np.nanmin(y)), float(np.nanmax(y))
+    zmin, zmax = float(np.nanmin(z)), float(np.nanmax(z))
+    ov = float(max(dists))
+
+    # Build non-overlapping core edges [lo, hi)
+    def edges(lo, hi, step):
+        e = []
+        cur = lo
+        while cur <= hi:
+            e.append((cur, cur + step))
+            cur += step
+        return e
+
+    x_edges = edges(xmin, xmax, float(x_size))
+    y_edges = edges(ymin, ymax, float(y_size))
+    z_edges = edges(zmin, zmax, float(z_size))
+
+    total_tiles = len(x_edges) * len(y_edges) * len(z_edges)
+    log(f"3D multi-radius smoothing (stable) in {total_tiles} tiles "
+        f"(core: {x_size}×{y_size}×{z_size}, overlap={ov}; radii={list(dists)})")
+
+    # Pre-sort radii to be polite to caches; we compute per-radius anyway
+    dists = list(dists)
+    out_cols = list(out_cols)
+
+    # Helper: compute mode code with max-on-tie from an array of non-negative int codes
+    # (caller must have removed -1 codes)
+    def mode_code(arr_codes: np.ndarray) -> int:
+        if arr_codes.size == 0:
+            return -1  # sentinel for "no mode"
+        # If categories are huge, bincount with minlength can be big; use unique path:
+        if (not prefer_bincount) or (n_uniques > 1_000_000) or (arr_codes.size < 4096):
+            u, c = np.unique(arr_codes, return_counts=True)
+            # max-on-tie -> take largest u among those with max count
+            maxc = c.max()
+            return int(u[c == maxc].max())
+        # Otherwise bincount (fast, but allocates up to n_uniques)
+        bc = np.bincount(arr_codes, minlength=n_uniques)
+        maxc = bc.max()
+        # pick largest index with that count
+        # np.where returns ascending indices; take last
+        return int(np.where(bc == maxc)[0][-1])
+
+    tile_id = 0
+    for (x_lo, x_hi) in x_edges:
+        ex_x = (x >= x_lo - ov) & (x < x_hi + ov)
+        cx_x = (x >= x_lo)     & (x < x_hi)
+        for (y_lo, y_hi) in y_edges:
+            ex_xy = ex_x & ((y >= y_lo - ov) & (y < y_hi + ov))
+            cx_xy = cx_x & ((y >= y_lo)     & (y < y_hi))
+            for (z_lo, z_hi) in z_edges:
+                tile_id += 1
+
+                exp_mask  = ex_xy & ((z >= z_lo - ov) & (z < z_hi + ov))
+                core_mask = cx_xy & ((z >= z_lo)      & (z < z_hi))
+
+                if not core_mask.any():
+                    continue  # nothing to write
+
+                # Get indices (saves RAM vs materializing masked arrays)
+                exp_idx  = np.flatnonzero(exp_mask)
+                core_idx = np.flatnonzero(core_mask)
+                Nc = core_idx.size
+                if exp_idx.size == 0:
+                    # no references; copy original for each out column
+                    for oc in out_cols:
+                        df.loc[core_idx, oc] = df.loc[core_idx, col]
+                    continue
+
+                # Build KDTree on expanded points (float32 coords)
+                exp_pts = np.empty((exp_idx.size, 3), dtype=np.float32)
+                exp_pts[:, 0] = x[exp_idx]
+                exp_pts[:, 1] = y[exp_idx]
+                exp_pts[:, 2] = z[exp_idx]
+                tree = cKDTree(
+                    exp_pts,
+                    leafsize=leafsize,
+                    balanced_tree=False,
+                    compact_nodes=False,
+                    copy_data=False
+                )
+
+                # Core coords (chunked)
+                core_pts = np.empty((Nc, 3), dtype=np.float32)
+                core_pts[:, 0] = x[core_idx]
+                core_pts[:, 1] = y[core_idx]
+                core_pts[:, 2] = z[core_idx]
+
+                # Pre-extract codes for expanded region to avoid repeated gathers
+                exp_codes = codes[exp_idx]  # int64 (contains -1 for NaN)
+
+                # Process core in batches to cap memory
+                for start in range(0, Nc, core_batch):
+                    stop = min(start + core_batch, Nc)
+                    batch_idx = core_idx[start:stop]
+                    batch_pts = core_pts[start:stop]
+
+                    # For each radius, compute and write immediately (no big retention)
+                    for r, oc in zip(dists, out_cols):
+                        # Neighbor lists for this batch only
+                        nbrs = tree.query_ball_point(batch_pts, r=float(r))
+
+                        # Prepare output buffer
+                        out_codes = np.empty(stop - start, dtype=np.int64)
+
+                        # Compute modes row-by-row (neighbors per row vary)
+                        for i, loc in enumerate(nbrs):
+                            if progress_every and ((start + i) % progress_every == 0):
+                                log(
+                                    f"Tile {tile_id}/{total_tiles} "
+                                    f"X[{x_lo:.2f},{x_hi:.2f}) Y[{y_lo:.2f},{y_hi:.2f}) Z[{z_lo:.2f},{z_hi:.2f}) "
+                                    f"{start + i}/{Nc} cells  r={r}"
+                                )
+                            if not loc:  # no neighbors: copy original
+                                out_codes[i] = codes[batch_idx[i]]
+                                continue
+
+                            neigh_codes = exp_codes[loc]
+                            # drop NaN sentinel (-1) if present
+                            if (neigh_codes >= 0).any():
+                                neigh_codes = neigh_codes[neigh_codes >= 0]
+                                mc = mode_code(neigh_codes)
+                                if mc >= 0:
+                                    out_codes[i] = mc
+                                else:
+                                    out_codes[i] = codes[batch_idx[i]]
+                            else:
+                                out_codes[i] = codes[batch_idx[i]]
+
+                        # Map codes back to original dtype and write
+                        df.loc[batch_idx, oc] = uniques[out_codes]
+
+                # Drop big temporaries ASAP
+                del exp_pts, core_pts, exp_codes, tree
+
+    log("3D multi-radius KDTree smoothing complete (memory-stable).")
+
