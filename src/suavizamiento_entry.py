@@ -29,12 +29,22 @@ col = args["col"]
 out_bm = args["out_bm"]
 out_col = args["out_col"]
 
+
+response = dict()
+
 #####################################################
 
 log(f"Suavizamiento V{version}\n")
 
 # read the block model
-command = f"SELCOP &IN={bm} &OUT=xxxBMF *F1=XC *F2=YC *F3=ZC *F4={col}"
+command = f"""
+SELCOP 
+&IN={bm} &OUT=xxxBMF 
+*F1=XC *F2=YC *F3=ZC 
+*F4=XINC *F5=YINC *F6=ZINC 
+*F7={col}
+""".replace("\n", " ")
+
 oDmApp.parseCommand(command)
 
 df = get_dm_table("xxxBMF", oDmApp)
@@ -42,8 +52,8 @@ df = get_dm_table("xxxBMF", oDmApp)
 command = "DELETE &IN=xxxBMF"
 oDmApp.parseCommand(command)
 
-# df = df[["XC", "YC", "ZC", col]]
 df[["XC", "YC", "ZC"]] = df[["XC", "YC", "ZC"]].astype("float32")
+df["VOL"] = df["XINC"] * df["YINC"] * df["ZINC"] 
 
 
 if version == 1: 
@@ -113,6 +123,23 @@ elif version == 7:
         log=log
     )
 
+
+response["reports"] = dict()
+
+for out_col, dist in zip(out_cols, dists):
+
+    report =  report_volume_variation(
+        df, 
+        "VOL", 
+        col, 
+        out_col
+    )
+
+    report_json = df_to_json_table(report)
+
+    response["reports"][dist] = report_json
+
+
 msg = f"Writing output"
 oDmApp.ControlBars.Output.write(msg)
 
@@ -132,8 +159,7 @@ oDmApp.parseCommand(command)
 
 #####################################################
 
-response = json.dumps({
-    "status": "OK"
-})
+response["status"] = "OK"
+response = json.dumps(response)
 
 print(response)
