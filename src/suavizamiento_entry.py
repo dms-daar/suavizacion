@@ -12,23 +12,24 @@ import sys
 from rmprocs.dm import *
 from rmprocs.suavizamiento import *
 
-args = json.loads(sys.argv[1])
-
-version = 4
-
-bm = args["bm"]
-col = args["col"]
-
-out_bm = args["out_bm"]
-out_col = args["out_col"]
-
-#####################################################
 
 oDmApp, PROJECT_FOLDER = get_oDmApp()
 
 def log(x): 
     x = x + "\n"
     oDmApp.ControlBars.Output.Write(x)
+
+#####################################################
+
+version = 6
+
+args = json.loads(sys.argv[1])
+bm = args["bm"]
+col = args["col"]
+out_bm = args["out_bm"]
+out_col = args["out_col"]
+
+#####################################################
 
 log(f"Suavizamiento V{version}\n")
 
@@ -39,24 +40,61 @@ df[["XC", "YC", "ZC"]] = df[["XC", "YC", "ZC"]].astype("float32")
 
 
 if version == 1: 
+
     dist = int(args["dist"])
     out_cols = [out_col]
+
     suavizar_col(df, col, dist, out_col)
 
 elif version == 2: 
+
     dists = [int(d) for d in args["dist"].split(",")]
     out_cols = [f"{out_col}_{d}" for d in dists]
+
     suavizar_multiple(df, col, dists, out_cols)
 
 elif version == 3: 
+
     dist = int(args["dist"])
     out_cols = [out_col]
-    suavizar_col_batched(df, col, dist, out_col, log=log)
+
+    suavizar_col_batched(
+        df, col, dist, out_col, 
+        log=log
+    )
 
 elif version == 4: 
+
     dists = [int(d) for d in args["dist"].split(",")]
     out_cols = [f"{out_col}_{d}" for d in dists]
-    suavizar_batched_multi(df, col, dists, out_cols, log=log)
+
+    suavizar_batched_multi(
+        df, col, dists, out_cols, 
+        log=log
+    )
+
+elif version == 5: 
+
+    dist = int(args["dist"])
+    out_cols = [out_col]
+
+    suavizar_col_batched_xyz(
+        df, col, dist, out_col, 
+        x_size=100, y_size=100, z_size=50,
+        log=log
+    )
+
+
+elif version == 6: 
+
+    dists = [int(d) for d in args["dist"].split(",")]
+    out_cols = [f"{out_col}_{d}" for d in dists]
+
+    suavizar_batched_xyz_multi(
+        df, col, dists, out_cols, 
+        x_size=50, y_size=50, z_size=50,
+        log=log
+    )
 
 
 msg = f"Writing output"
