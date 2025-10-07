@@ -1,0 +1,118 @@
+<html>
+<head>
+
+<script src="js/functions.js"></script>
+<script src="js/interactive.js"></script>
+<script text="javascript">
+
+var SCRIPTS_FOLDER = 'C:\\Projects\\minsur\\suavizamiento_cat_rec\\src' 
+var CONDA_ENV = "pyrmenv";
+
+
+var oScript = new ActiveXObject("StudioCommon.ScriptHelper");
+oScript.initialize(window);
+var oDmApp = oScript.getApplication();
+
+var SHELL = new ActiveXObject("WSCRIPT.SHELL");
+var FSO = new ActiveXObject("Scripting.FileSystemObject");
+
+var PROJECT_FOLDER = oDmApp.ActiveProject.Folder.split('\\').join('/');
+var TEMP_FOLDER = PROJECT_FOLDER + "/temp";
+
+
+function suavizar_bm(){
+  
+  var bm = document.getElementById('in_bm').value; 
+  var col = document.getElementById('in_col').value; 
+  var dist = document.getElementById('in_dist').value;  
+
+  var out_col = document.getElementById('in_oc').value; 
+  var out_bm = document.getElementById('in_obm').value; 
+
+
+  // ################################################ // 
+
+  var script = "suavizamiento_entry.py"
+  
+  var args = {
+    bm: bm, 
+    col: col, 
+    dist: dist, 
+    out_bm: out_bm, 
+    out_col: out_col
+  }
+
+  var response = run_python(script, args); 
+
+  alert("Finished");
+
+}
+
+
+function btnBrowseBM1_onClick() {
+
+  // search DmFileType in documentation for full list
+  var table = BrowseAndSave(oScript.DmFileType.dmBlockModel, 'in_bm');
+  columnPicklist(table, "in_col")
+
+  var bm = document.getElementById('in_bm').value; 
+  // var col = document.getElementById('in_col').value; 
+
+  // var out_col = document.getElementById('in_oc'); 
+  var out_bm = document.getElementById('in_obm'); 
+
+  // out_col.value = bm + "_SUAV"
+  out_bm.value = bm + "_SUAV"
+
+}
+
+
+function selCol_onSelect() {
+  
+  var col = document.getElementById('in_col').value; 
+  var out_col = document.getElementById('in_oc'); 
+  out_col.value = col + "_SUAV"
+
+}
+
+</script>
+</head>
+
+<body >
+
+  	<table>
+		<tr>
+			<td>Block Model</td>
+      <td><input type="text" id="in_bm"></td>
+      <td>
+        <input 
+        type="button" 
+        id="in_bm" 
+        value="..." 
+        onClick="btnBrowseBM1_onClick();">
+      </td>
+		</tr>
+  		<tr>
+			<td>Column</td>
+      <td> 
+        <select id="in_col" onchange="selCol_onSelect();">
+      </td>
+		</tr>
+  		<tr>
+			<td>Distance</td>
+      <td><input type="text" id="in_dist" style="width: 140px;" value="10,20"></td>
+		</tr>
+  		<tr>
+			<td>Out Block Model</td>
+      <td><input type="text" id="in_obm" style="width: 140px;"></td>
+		</tr>
+  		<tr>
+			<td>Out Column</td>
+      <td><input type="text" id="in_oc" style="width: 140px;"></td>
+		</tr>
+	</table>
+
+<button onclick="suavizar_bm();">Suavizar</button>
+    
+</body>
+</html>
