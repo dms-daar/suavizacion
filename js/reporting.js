@@ -44,3 +44,29 @@ function renderTableFromJSON(tableOrId, data) {
   }
   table.appendChild(tbody);
 }
+
+
+// function styleReportTable() {
+//     var tbl = document.getElementById('reportTable');
+//     if (!tbl) return;
+
+//     // Detect columns by header text
+//     var headers = tbl.getElementsByTagName('th');
+//     var numericCols = {};
+//     for (var i = 0; i < headers.length; i++) {
+//     var h = headers[i].innerText || headers[i].textContent;
+//     if (/^(var|.*vol|cate(_suav.*)?|count|total)$/i.test(h)) numericCols[i] = 'num';
+//     if (/%/.test(h) || /% ?var/i.test(h)) numericCols[i] = 'pct';
+//     }
+
+//     // Apply classes to cells
+//     var rows = tbl.tBodies.length ? tbl.tBodies[0].rows : [];
+//     for (var r = 0; r < rows.length; r++) {
+//         var cells = rows[r].cells;
+//         for (var c = 0; c < cells.length; c++) {
+//             if (numericCols[c] === 'num') cells[c].className += ' num';
+//             if (numericCols[c] === 'pct') cells[c].className += ' pct';
+//         }
+//     }
+// }
+

@@ -1,8 +1,12 @@
 <html>
 <head>
+
 <script src="js/conf.js"></script>
 <script src="js/functions.js"></script>
 <script src="js/interactive.js"></script>
+<script src="js/reporting.js"></script>
+<script src="js/utilities.js"></script>
+
 <script text="javascript">
 
 var oScript = new ActiveXObject("StudioCommon.ScriptHelper");
@@ -14,7 +18,32 @@ var FSO = new ActiveXObject("Scripting.FileSystemObject");
 
 var PROJECT_FOLDER = oDmApp.ActiveProject.Folder.split('\\').join('/');
 var TEMP_FOLDER = PROJECT_FOLDER + "\\temp";
+var REPORTS = null;
 
+
+function setText(el, txt){ 
+  if ('textContent' in el) el.textContent = txt; 
+  else el.innerText = txt; 
+}
+
+
+// Populate the <select> with distances (array of ints or strings)
+function populateDistanceSelect(distList){
+  var sel = document.getElementById('distSelect');
+  if (!sel) return;
+  // Clear options
+  while (sel.options.length) sel.remove(0);
+
+  // Add options
+  for (var i=0;i<distList.length;i++){
+    var d = String(distList[i]);
+    var opt = document.createElement('option');
+    opt.value = d;
+    setText(opt, d);
+    sel.appendChild(opt);
+  }
+
+}
 
 function suavizar_bm(){
   
@@ -40,6 +69,14 @@ function suavizar_bm(){
 
   var response = run_python(script, args); 
 
+  dists = parseIntList(dist);
+  populateDistanceSelect(dists)
+
+  REPORTS = response["reports"]
+
+  var table_json = REPORTS[dists[0]]
+  renderTableFromJSON("reportTable", table_json);
+  
   alert("Finished");
 
 }
@@ -68,6 +105,17 @@ function selCol_onSelect() {
   var col = document.getElementById('in_col').value; 
   var out_col = document.getElementById('in_oc'); 
   out_col.value = col + "_SUAV"
+
+}
+
+
+function selDist_onSelect(){
+
+    var dist = document.getElementById('distSelect').value; 
+    dist = parseInt(dist)
+
+    var table_json = REPORTS[dist]
+    renderTableFromJSON("reportTable", table_json);
 
 }
 
@@ -218,6 +266,61 @@ function selCol_onSelect() {
 
     .wrap.compact .hint { font-size: 11px; margin-top: 2px; }
 
+/* Container for horizontal scroll if needed */
+.table-wrap { overflow-x: auto; }
+
+/* Base table */
+#reportTable {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: Arial, "Segoe UI", Tahoma, sans-serif;
+  font-size: 13px;                 /* compact */
+  color: #1a1a1a;
+  table-layout: auto;              /* IE-safe */
+}
+
+/* Header */
+#reportTable thead th {
+  background: #f3f4f6;
+  color: #111827;
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #d1d5db;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+/* Cells */
+#reportTable tbody td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: middle;
+}
+
+/* Zebra */
+#reportTable tbody tr:nth-child(odd) { background: #fafafa; }
+
+/* Hover */
+#reportTable tbody tr:hover { background: #eef2ff; }
+
+/* Alignment helpers (apply via JS or markup) */
+#reportTable .num  { text-align: right; font-variant-numeric: tabular-nums; }
+#reportTable .pct  { text-align: right; }
+#reportTable .mono { font-family: Consolas, "Courier New", monospace; }
+
+/* Compact footer / note (optional) */
+#reportTable tfoot td {
+  padding: 6px 10px;
+  color: #6b7280;
+  font-size: 12px;
+  border-top: 1px solid #d1d5db;
+}
+
+/* Print tweaks */
+@media print {
+  #reportTable thead th { background: #e5e7eb !important; -webkit-print-color-adjust: exact; }
+  #reportTable tbody tr:hover { background: transparent !important; }
+}
 
   </style>
 
@@ -285,7 +388,15 @@ function selCol_onSelect() {
       </div>
     </div>
   </div>
+
+  <div class="table-controls" class="wrap compact">>
+    <label for="distSelect" style="margin-right:6px;font-weight:600;">Distance:</label>
+    <select id="distSelect" style="min-width:110px;height:28px;padding:2px 6px;" onchange="selDist_onSelect();"></select>
+  </div>
+
+  <div class="table-wrap">
+    <table id="reportTable"></table>
+  </div>
+
 </body>
-
-
 </html>
