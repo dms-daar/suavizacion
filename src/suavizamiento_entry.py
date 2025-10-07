@@ -21,7 +21,7 @@ def log(x):
 
 #####################################################
 
-version = 6
+version = 7
 
 args = json.loads(sys.argv[1])
 bm = args["bm"]
@@ -34,8 +34,15 @@ out_col = args["out_col"]
 log(f"Suavizamiento V{version}\n")
 
 # read the block model
-df = get_dm_table(bm, oDmApp)
-df = df[["XC", "YC", "ZC", col]]
+command = f"SELCOP &IN={bm} &OUT=xxxBMF *F1=XC *F2=YC *F3=ZC *F4={col}"
+oDmApp.parseCommand(command)
+
+df = get_dm_table("xxxBMF", oDmApp)
+
+command = "DELETE &IN=xxxBMF"
+oDmApp.parseCommand(command)
+
+# df = df[["XC", "YC", "ZC", col]]
 df[["XC", "YC", "ZC"]] = df[["XC", "YC", "ZC"]].astype("float32")
 
 
@@ -84,7 +91,6 @@ elif version == 5:
         log=log
     )
 
-
 elif version == 6: 
 
     dists = [int(d) for d in args["dist"].split(",")]
@@ -96,6 +102,16 @@ elif version == 6:
         log=log
     )
 
+elif version == 7: 
+
+    dists = [int(d) for d in args["dist"].split(",")]
+    out_cols = [f"{out_col}_{d}" for d in dists]
+
+    suavizar_batched_xyz_multi_stable(
+        df, col, dists, out_cols, 
+        x_size=50, y_size=50, z_size=50,
+        log=log
+    )
 
 msg = f"Writing output"
 oDmApp.ControlBars.Output.write(msg)
