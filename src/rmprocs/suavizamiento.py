@@ -3,6 +3,7 @@
 from scipy.spatial import cKDTree 
 import pandas as pd 
 import numpy as np
+import json, re
 
 
 def suavizar_col(df, col, dist, out_col): 
@@ -767,3 +768,80 @@ def suavizar_batched_xyz_multi_stable(
 
     log("3D multi-radius KDTree smoothing complete (memory-stable).")
 
+
+def report_volume_variation(bm, ton, col, out_col):
+
+    res1 = bm.groupby([col])[[ton]].sum()
+    res1 = res1.reset_index()
+    res1[ton] = res1[ton].round(0)
+    res1 = res1.rename(columns={ton: "CATE_TOTAL_VOL"})
+
+
+    res2 = bm.groupby([col, out_col])[[ton]].sum()
+    res2 = res2.reset_index()
+
+    res2[out_col] = res2[out_col].astype(int)
+    res2[ton] = res2[ton].round(0)
+    res2 = res2.rename(columns={ton: "VAR_VOL"})
+
+    res2 = res2.set_index(col).join(
+        res1.set_index(col), 
+        how="left"
+    ).reset_index()
+
+    res2["% VAR"] = (res2["VAR_VOL"] / res2["CATE_TOTAL_VOL"]) * 100
+    res2["% VAR"] = res2["% VAR"].apply(lambda x: f"{x:.1f}%")
+
+    res2 = res2.drop(columns=["CATE_TOTAL_VOL"])
+
+    return res2
+
+
+def df_to_json_table(df, percent_cols=None, float_ndigits=1):
+    """
+    Returns a dict like:
+    {
+      "columns": [{"key":"cate","label":"CATE"}, ...],
+      "rows": [{"cate":1, "cate_suav":1, "var_vol":9850, "pct_var":"66.3%"}, ...]
+    }
+    - percent_cols: list of column names to format as '##.#%' strings.
+    """
+    percent_cols = set(percent_cols or [])
+    cols = list(df.columns)
+
+    # Make safe keys (no spaces/symbols)
+    def make_key(name):
+        return re.sub(r'\W+', '_', str(name)).strip('_').lower()
+
+    col_defs = [{"key": make_key(c), "label": str(c)} for c in cols]
+
+    rows = []
+    for _, r in df.iterrows():
+        row = {}
+        for c, cdef in zip(cols, col_defs):
+            v = r[c]
+            key = cdef["key"]
+
+            if pd.isna(v):
+                row[key] = None
+                continue
+
+            if c in percent_cols:
+                # Accepts either 0..1 or 0..100, outputs e.g. '66.3%'
+                try:
+                    fv = float(v)
+                    if fv <= 1.0:
+                        fv *= 100.0
+                    row[key] = f"{round(fv, float_ndigits)}%"
+                except Exception:
+                    row[key] = str(v)
+            else:
+                if isinstance(v, (np.integer, int)):
+                    row[key] = int(v)
+                elif isinstance(v, (np.floating, float)):
+                    row[key] = float(v)
+                else:
+                    row[key] = str(v)
+        rows.append(row)
+
+    return {"columns": col_defs, "rows": rows}
