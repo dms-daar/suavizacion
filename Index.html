@@ -21,6 +21,44 @@ var TEMP_FOLDER = PROJECT_FOLDER + "\\temp";
 var REPORTS = null;
 
 
+function on(el, evt, fn){ 
+  if(el.addEventListener) el.addEventListener(evt,fn,false); 
+  else if(el.attachEvent) el.attachEvent('on'+evt,fn); else el['on'+evt]=fn; }
+
+// ---------- Tabs ----------
+function switchTab(tabId){
+  var tabs = document.getElementById('tabs').getElementsByTagName('button');
+  for (var i=0;i<tabs.length;i++){
+    var t = tabs[i], target = t.getAttribute('data-target');
+    var panel = document.getElementById(target);
+    if (target === tabId){
+      t.className = 'tab active';
+      if (panel && panel.className.indexOf('tab-visible') === -1) panel.className += ' tab-visible';
+    } else {
+      t.className = 'tab';
+      if (panel) panel.className = panel.className.replace(/\btab-visible\b/g,'');
+    }
+  }
+}
+function initTabs(){
+  var tabs = document.getElementById('tabs').getElementsByTagName('button');
+  for (var i=0;i<tabs.length;i++){
+    (function(btn){
+      var id = btn.getAttribute('data-target');
+      if (btn.addEventListener) btn.addEventListener('click', function(){ switchTab(id); }, false);
+      else if (btn.attachEvent) btn.attachEvent('onclick', function(){ switchTab(id); });
+      else btn.onclick = function(){ switchTab(id); };
+    })(tabs[i]);
+  }
+  switchTab('tab-params');
+}
+// call it robustly
+if (window.addEventListener) window.addEventListener('load', initTabs, false);
+else if (window.attachEvent) window.attachEvent('onload', initTabs);
+else window.onload = initTabs;
+
+
+
 function setText(el, txt){ 
   if ('textContent' in el) el.textContent = txt; 
   else el.innerText = txt; 
@@ -119,245 +157,103 @@ function selDist_onSelect(){
 
 }
 
+on(window, 'load', initTabs);
+
 </script>
 </head>
 <body>
 
-  <!-- Simple, IE-friendly styles -->
+
   <style>
-    /* Layout */
-    .wrap {
-      max-width: 680px;
-      margin: 32px auto;
-      padding: 0 16px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
-      color: #1a1a1a;
-    }
+/* Base */
+.wrap { max-width: 680px; margin: 32px auto; padding: 0 16px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif; color:#1a1a1a; }
+.card { background:#fff; border:1px solid #e5e5e5; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.06); padding:20px; }
+.card h1 { font-size:18px; margin:0 0 16px; font-weight:600; }
+.form-table { width:100%; border-collapse:collapse; }
+.form-table td { padding:10px 8px; vertical-align:middle; }
+.form-table td:first-child { width:180px; color:#444; white-space:nowrap; font-weight:600; }
+input[type="text"], select { width:100%; padding:8px 10px; border:1px solid #cfd8dc; border-radius:6px; box-sizing:border-box; font-size:14px; background:#fff; outline:none; }
+input[type="text"]:focus, select:focus { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.15); }
+.inline { display:-ms-flexbox; display:flex; -ms-flex-align:center; align-items:center; }
+.inline > * { margin-right:8px; }
+.inline > *:last-child { margin-right:0; }
+.btn { display:inline-block; padding:8px 14px; font-size:14px; font-weight:600; border-radius:6px; border:1px solid transparent; cursor:pointer; background:#2563eb; color:#fff; text-decoration:none; line-height:1.2; }
+.btn:hover { opacity:.9; }
+.btn:active { opacity:.85; }
+.btn-secondary { background:#f3f4f6; color:#111827; border-color:#d1d5db; }
+.actions { margin-top:16px; text-align:right; }
+.hint { font-size:12px; color:#6b7280; margin-top:4px; }
 
-    .card {
-      background: #fff;
-      border: 1px solid #e5e5e5;
-      border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.06);
-      padding: 20px;
-    }
+/* Compact */
+.wrap.compact { max-width:520px; }
+.wrap.compact, .wrap.compact .card { font-size:13px; }
+.wrap.compact .card { padding:12px; border-radius:6px; }
+.wrap.compact .form-table td { padding:6px 6px; }
+.wrap.compact .form-table td:first-child { width:150px; }
+.wrap.compact input[type="text"], .wrap.compact select { padding:6px 8px; font-size:13px; border-radius:4px; height:30px; line-height:18px; }
+.wrap.compact .inline > * { margin-right:6px; }
+.wrap.compact .btn { padding:6px 10px; font-size:13px; border-radius:4px; }
+.wrap.compact .actions { margin-top:12px; }
+.wrap.compact .hint { font-size:11px; margin-top:2px; }
 
-    .card h1 {
-      font-size: 18px;
-      margin: 0 0 16px;
-      font-weight: 600;
-    }
+/* Tabs */
+.tabs { display:block; margin:0 auto 10px; padding:0 16px; max-width:680px; }
+.tabs.compact { max-width:520px; }
+.tabbar { border-bottom:1px solid #e5e5e5; padding-top:4px; }
+.tab { background:#f9fafb; border:1px solid #e5e5e5; border-bottom:none; padding:8px 12px; margin:0 6px -1px 0;
+  border-top-left-radius:6px; border-top-right-radius:6px; cursor:pointer; font-weight:600; }
+.tab.active { background:#fff; color:#111827; }
+.tab-panel { display:none; }
+.tab-visible { display:block; }
 
-    /* Table form (reliable in IE) */
-    .form-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
+/* Table */
+.table-wrap { overflow-x:auto; }
+#reportTable { border-collapse:collapse; width:100%; font-family:Arial,"Segoe UI",Tahoma,sans-serif; font-size:13px; color:#1a1a1a; table-layout:auto; }
+#reportTable thead th { background:#f3f4f6; color:#111827; text-align:left; padding:8px 10px; border-bottom:1px solid #d1d5db; white-space:nowrap; font-weight:700; }
+#reportTable tbody td { padding:8px 10px; border-bottom:1px solid #e5e7eb; vertical-align:middle; }
+#reportTable tbody tr:nth-child(odd) { background:#fafafa; }
+#reportTable tbody tr:hover { background:#eef2ff; }
+#reportTable .num { text-align:right; }
+#reportTable .pct { text-align:right; }
+#reportTable .mono { font-family:Consolas,"Courier New",monospace; }
+</style>
 
-    .form-table td {
-      padding: 10px 8px;
-      vertical-align: middle;
-    }
 
-    .form-table td:first-child {
-      width: 180px;
-      color: #444;
-      white-space: nowrap;
-      font-weight: 600;
-    }
+  
+    <!-- TAB HEADERS -->
+  <div id="tabs" class="tabs compact">
+    <div class="tabbar">
+      <button type="button" class="tab active" data-target="tab-params">Parametros</button>
+      <button type="button" class="tab" data-target="tab-report">Reporte</button>
+    </div>
+  </div>
 
-    /* Inputs */
-    input[type="text"],
-    select {
-      width: 100%;
-      padding: 8px 10px;
-      border: 1px solid #cfd8dc;
-      border-radius: 6px;
-      box-sizing: border-box;
-      font-size: 14px;
-      background-color: #fff;
-      outline: none;
-    }
-
-    input[type="text"]:focus,
-    select:focus {
-      border-color: #3b82f6; /* ok in IE as a plain color */
-      box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
-    }
-
-    /* Inline input + button */
-    .inline {
-      display: -ms-flexbox;      /* IE 10/11 */
-      display: flex;
-      -ms-flex-align: center;
-      align-items: center;
-      gap: 8px;                  /* not in IE; we emulate with margins below */
-    }
-    .inline > * { margin-right: 8px; }
-    .inline > *:last-child { margin-right: 0; }
-
-    .btn {
-      display: inline-block;
-      padding: 8px 14px;
-      font-size: 14px;
-      font-weight: 600;
-      border-radius: 6px;
-      border: 1px solid transparent;
-      cursor: pointer;
-      background: #2563eb;
-      color: #fff;
-      transition: opacity .15s ease;
-      text-decoration: none;
-      line-height: 1.2;
-    }
-    .btn:hover { opacity: .9; }
-    .btn:active { opacity: .85; }
-
-    .btn-secondary {
-      background: #f3f4f6;
-      color: #111827;
-      border-color: #d1d5db;
-    }
-
-    /* Footer actions */
-    .actions {
-      margin-top: 16px;
-      text-align: right;
-    }
-
-    /* Help text */
-    .hint {
-      font-size: 12px;
-      color: #6b7280;
-      margin-top: 4px;
-    }
-
-      /* Compact mode (IE-safe) */
-    .wrap.compact { max-width: 520px; }               /* narrower card */
-    .wrap.compact, 
-    .wrap.compact .card { font-size: 13px; }          /* smaller base font */
-
-    .wrap.compact .card { padding: 12px; border-radius: 6px; }
-
-    .wrap.compact .form-table td { padding: 6px 6px; } /* tighter rows */
-    .wrap.compact .form-table td:first-child {
-      width: 150px;                                   /* narrower label column */
-      font-weight: 600;
-    }
-
-    .wrap.compact input[type="text"],
-    .wrap.compact select {
-      padding: 6px 8px;            /* shorter inputs */
-      font-size: 13px;
-      border-radius: 4px;
-      height: 30px;                /* forces smaller height in IE */
-      line-height: 18px;           /* keep text centered */
-    }
-
-    .wrap.compact .inline > * { margin-right: 6px; }  /* smaller gaps */
-
-    .wrap.compact .btn {
-      padding: 6px 10px;
-      font-size: 13px;
-      border-radius: 4px;
-    }
-
-    .wrap.compact .actions { margin-top: 12px; }
-
-    .wrap.compact .hint { font-size: 11px; margin-top: 2px; }
-
-/* Container for horizontal scroll if needed */
-.table-wrap { overflow-x: auto; }
-
-/* Base table */
-#reportTable {
-  border-collapse: collapse;
-  width: 100%;
-  font-family: Arial, "Segoe UI", Tahoma, sans-serif;
-  font-size: 13px;                 /* compact */
-  color: #1a1a1a;
-  table-layout: auto;              /* IE-safe */
-}
-
-/* Header */
-#reportTable thead th {
-  background: #f3f4f6;
-  color: #111827;
-  text-align: left;
-  padding: 8px 10px;
-  border-bottom: 1px solid #d1d5db;
-  white-space: nowrap;
-  font-weight: 700;
-}
-
-/* Cells */
-#reportTable tbody td {
-  padding: 8px 10px;
-  border-bottom: 1px solid #e5e7eb;
-  vertical-align: middle;
-}
-
-/* Zebra */
-#reportTable tbody tr:nth-child(odd) { background: #fafafa; }
-
-/* Hover */
-#reportTable tbody tr:hover { background: #eef2ff; }
-
-/* Alignment helpers (apply via JS or markup) */
-#reportTable .num  { text-align: right; font-variant-numeric: tabular-nums; }
-#reportTable .pct  { text-align: right; }
-#reportTable .mono { font-family: Consolas, "Courier New", monospace; }
-
-/* Compact footer / note (optional) */
-#reportTable tfoot td {
-  padding: 6px 10px;
-  color: #6b7280;
-  font-size: 12px;
-  border-top: 1px solid #d1d5db;
-}
-
-/* Print tweaks */
-@media print {
-  #reportTable thead th { background: #e5e7eb !important; -webkit-print-color-adjust: exact; }
-  #reportTable tbody tr:hover { background: transparent !important; }
-}
-
-  </style>
-
-  <div class="wrap compact">
-    <div class="card">
+  
+  <!-- TAB 1: Parametros -->
+<div id="tab-params" class="wrap compact tab-panel tab-visible"> 
+   <div class="card">
       <h1>Parametros de Suavizamiento</h1>
-
       <table class="form-table" role="presentation">
         <tr>
           <td><label for="in_bm">Block Model</label></td>
           <td colspan="2">
             <div class="inline">
               <input type="text" id="in_bm" />
-              <input
-                type="button"
-                id="btn_bm"
-                class="btn btn-secondary"
-                value="..."
-                onclick="btnBrowseBM1_onClick();"
-                title="Seleccionar Block Model"
-              />
+              <input type="button" id="btn_bm" class="btn btn-secondary" value="..." onclick="btnBrowseBM1_onClick();" title="Seleccionar Block Model" />
             </div>
             <div class="hint">Ruta del archivo del block model de entrada.</div>
           </td>
         </tr>
-
         <tr>
           <td><label for="in_col">Column</label></td>
           <td colspan="2">
             <select id="in_col" onchange="selCol_onSelect();">
               <option value="">...</option>
-              <!-- Opciones se llenan por JS -->
             </select>
             <div class="hint">Elija la columna a suavizar.</div>
           </td>
         </tr>
-
         <tr>
           <td><label for="in_dist">Distance</label></td>
           <td colspan="2">
@@ -365,7 +261,6 @@ function selDist_onSelect(){
             <div class="hint">Use comas para multiples distancias (ej.: 10,20).</div>
           </td>
         </tr>
-
         <tr>
           <td><label for="in_obm">Out Block Model</label></td>
           <td colspan="2">
@@ -373,7 +268,6 @@ function selDist_onSelect(){
             <div class="hint">Nombre del block model suavizado.</div>
           </td>
         </tr>
-
         <tr>
           <td><label for="in_oc">Out Column</label></td>
           <td colspan="2">
@@ -382,20 +276,24 @@ function selDist_onSelect(){
           </td>
         </tr>
       </table>
-
       <div class="actions">
         <button class="btn" onclick="suavizar_bm();">Suavizar</button>
       </div>
     </div>
   </div>
 
-  <div class="table-controls" class="wrap compact">>
-    <label for="distSelect" style="margin-right:6px;font-weight:600;">Distance:</label>
-    <select id="distSelect" style="min-width:110px;height:28px;padding:2px 6px;" onchange="selDist_onSelect();"></select>
-  </div>
-
-  <div class="table-wrap">
-    <table id="reportTable"></table>
+  <!-- TAB 2: Reporte -->
+  <div id="tab-report"  class="wrap compact tab-panel"> 
+    <div class="card">
+      <h1>Reporte</h1>
+      <div class="table-controls" style="margin:8px 0 12px;">
+        <label for="distSelect" style="margin-right:6px;font-weight:600;">Distance:</label>
+        <select id="distSelect" style="min-width:110px;height:30px;padding:6px 8px;" onchange="selDist_onSelect();"></select>
+      </div>
+      <div class="table-wrap">
+        <table id="reportTable"></table>
+      </div>
+    </div>
   </div>
 
 </body>
