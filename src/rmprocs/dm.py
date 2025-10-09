@@ -5,6 +5,7 @@ import numpy as np
 import win32com.client
 import os 
 import pywintypes
+from datetime import datetime
 
 
 def getDmFileType():
@@ -42,57 +43,91 @@ def get_oDmApp(app="StudioRM"):
 
 
 def get_dm_table(table, oDmApp):
-
     project_folder = oDmApp.ActiveProject.Folder
+    table_path = os.path.join(project_folder, f"{table}{DMEXT}")
+    assert os.path.exists(table_path), f"Table {table}{DMEXT} does not exist"
 
-    table_path = f"{project_folder}\{table}{DMEXT}" 
-    assert  os.path.exists(table_path), f"Table {table}{DMEXT} does not exist"
+    # --- timestamped temp path ---
+    temp_dir = r"C:\temp"
+    os.makedirs(temp_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    path = os.path.join(temp_dir, f"temp0_{ts}.csv")
 
-    path = rf"C:\temp\temp0.csv"
-    if os.path.exists(path): os.remove(path)
+    try:
+        # Export to CSV
+        command = f"output &IN={table} @CSV=1 @NODD=0 @DPLACE=-1 @IMPLICIT=1 '{path}'"
+        oDmApp.ParseCommand(command)
 
-    command = f"output &IN={table} @CSV=1 @NODD=0 @DPLACE=-1 @IMPLICIT=1 '{path}'"
-    oDmApp.ParseCommand(command)
+        # Read and return
+        df = pd.read_csv(path, encoding="1252")
+        return df
 
-    df = pd.read_csv(path, encoding="1252")
-    return df 
+    finally:
+        # Always attempt cleanup
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            # optional: log cleanup issue
+            pass
 
 
 def save_df_as_table(df, table, oDmApp):
+    # --- timestamped temp path ---
+    temp_dir = r"C:\temp"
+    os.makedirs(temp_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    path = os.path.join(temp_dir, f"temp1_{ts}.csv")
 
+    # Work on a copy
     temp_df = df.copy()
-    path = rf"C:\temp\temp1.csv"
 
-    if os.path.exists(path): os.remove(path)
+    try:
+        # normalize column names (no spaces)
+        temp_df.columns = [c.replace(" ", "_") for c in temp_df.columns]
 
-    # change the column names
-    temp_df.columns = [c.replace(" ", "_") for c in temp_df.columns]
+        columns = temp_df.columns
+        numeric_columns = temp_df.select_dtypes(include='number').columns
+        object_columns = temp_df.columns.difference(numeric_columns)
 
-    columns = temp_df.columns
-    numeric_columns = temp_df.select_dtypes(include='number').columns
-    object_columns = temp_df.columns.difference(numeric_columns)
+        # cast non-numeric columns to str and compute max lengths
+        temp_df[object_columns] = temp_df[object_columns].astype(str)
+        object_columns_length = {
+            c: int(temp_df[c].str.len().max()) if len(temp_df) else 0
+            for c in object_columns
+        }
 
-    # cast non-numeric columns to str
-    temp_df[object_columns] = temp_df[object_columns].astype(str)
-    object_columns_length = {c: temp_df[c].str.len().max() for c in object_columns}
+        # write CSV without header/index
+        temp_df.to_csv(path, index=False, header=False)
 
-    temp_df.to_csv(path, index=None, header=None)
+        # build INPFIL column description
+        columns_desc = "\n".join([
+            (f"'{c} N Y -'" if c in numeric_columns
+             else f"'{c} A {object_columns_length.get(c, 0)} Y -'")
+            for c in columns
+        ])
 
-    columns_desc = "\n".join([
-        f"'{c} N Y -'" if c in numeric_columns else f"'{c} A {object_columns_length[c]} Y -'"
-        for c in columns
-    ])
+        command = f"""
+        INPFIL &OUT={table} @PRINT=0
+        'description'
+        {columns_desc}
+        '!'
+        'OK'
+        '{path}'
+        """
 
-    command = f"""
-    INPFIL &OUT={table} @PRINT=0
-    'description'
-    {columns_desc}
-    '!'
-    'OK' 
-    '{path}'
-    """
+        # send command (single-line)
+        oDmApp.ParseCommand(command.replace("\n", ""))
 
-    oDmApp.ParseCommand(command.replace("\n", ""))
+    finally:
+        # always try to delete the temp file
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            # optional: log/ignore cleanup failure
+            pass
+
 
 
 def load_3d(table, oDmApp, template=None):
