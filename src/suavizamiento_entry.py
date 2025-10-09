@@ -117,28 +117,35 @@ elif version == 7:
     dists = [int(d) for d in args["dist"].split(",")]
     out_cols = [f"{out_col}_{d}" for d in dists]
 
+    max_dist = 50 # 1*max(dists)
+
     suavizar_batched_xyz_multi_stable(
         df, col, dists, out_cols, 
-        x_size=50, y_size=50, z_size=50,
+        x_size=max_dist, y_size=max_dist, z_size=max_dist,
         log=log
     )
 
 
+# reports: mapping of report names to its json table
 response["reports"] = dict()
 
+
+# get the report of volume changes
+tvr, tvrf = reportar_volumenes(df, col, dists, out_cols)
+response["reports"]["TOTAL VOLUMES"] = df_to_json_table(tvrf)
+save_df_as_table(tvr, f"{bm}_total_volumnes", oDmApp)
+
+
+# for each distance, get the orig vs suav_dist report table
 for out_col, dist in zip(out_cols, dists):
+    report_name = f"VOLUME ORIG vs {dist}"
+    report =  report_volume_variation(df, "VOL", col, out_col)
+    response["reports"][report_name] = df_to_json_table(report)
+    save_df_as_table(report, f"{bm}_volume_orig_vs_{dist}", oDmApp)
 
-    report =  report_volume_variation(
-        df, 
-        "VOL", 
-        col, 
-        out_col
-    )
 
-    report_json = df_to_json_table(report)
-
-    response["reports"][dist] = report_json
-
+# construct a list with all the available reports
+response["reports_list"] = list(response["reports"].keys())
 
 msg = f"Writing output"
 oDmApp.ControlBars.Output.write(msg)

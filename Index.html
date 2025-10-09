@@ -107,12 +107,12 @@ function suavizar_bm(){
 
   var response = run_python(script, args); 
 
-  dists = parseIntList(dist);
-  populateDistanceSelect(dists)
-
   REPORTS = response["reports"]
+  var reports_list = response["reports_list"]
 
-  var table_json = REPORTS[dists[0]]
+  populateDistanceSelect(reports_list)
+  
+  var table_json = REPORTS[reports_list[0]]
   renderTableFromJSON("reportTable", table_json);
   
   alert("Finished");
@@ -150,8 +150,6 @@ function selCol_onSelect() {
 function selDist_onSelect(){
 
     var dist = document.getElementById('distSelect').value; 
-    dist = parseInt(dist)
-
     var table_json = REPORTS[dist]
     renderTableFromJSON("reportTable", table_json);
 
