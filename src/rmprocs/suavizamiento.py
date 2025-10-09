@@ -789,12 +789,14 @@ def report_volume_variation(bm, ton, col, out_col):
         how="left"
     ).reset_index()
 
-    res2["% VAR"] = (res2["VAR_VOL"] / res2["CATE_TOTAL_VOL"]) * 100
-    res2["% VAR"] = res2["% VAR"].apply(lambda x: f"{x:.1f}%")
-
+    res2["VAR_PCT"] = (res2["VAR_VOL"] / res2["CATE_TOTAL_VOL"]) * 100
     res2 = res2.drop(columns=["CATE_TOTAL_VOL"])
 
-    return res2
+    # nicely formatted for table rendering
+    resf = res2.copy()
+    resf["VAR_PCT"] = resf["VAR_PCT"].apply(lambda x: f"{x:.1f}%")
+
+    return res2, resf
 
 
 def reportar_volumenes(bm, col, dists, out_cols): 
@@ -876,3 +878,304 @@ def df_to_json_table(df, percent_cols=None, float_ndigits=1):
         rows.append(row)
 
     return {"columns": col_defs, "rows": rows}
+
+
+def summarize_bands_xyz_lean(
+    df: pd.DataFrame,
+    dist: float,
+    x_size: float,
+    y_size: float,
+    z_size: float,
+    keep_empty: bool = False,
+) -> pd.DataFrame:
+    """
+    Memory-lean summary for 3D tiling:
+      - Bins points to tiles once
+      - Aggregates counts and sums per tile
+      - Uses a 3D summed-area table to get n_indexed (core ± dist) in O(1)/tile
+      - Computes centroids from tile sums (no per-tile boolean masks)
+
+    Returns one row per tile (drops empty tiles unless keep_empty=True) with:
+      tile_id, ix, iy, iz,
+      x_lo/x_hi, y_lo/y_hi, z_lo/z_hi,
+      x_center/y_center/z_center,
+      cx/cy/cz (centroid of core points; NaN if empty),
+      n_indexed, n_smoothed
+    """
+    # ---- Validation ----
+    if not all(s > 0 for s in (x_size, y_size, z_size)):
+        raise ValueError("x_size, y_size, and z_size must be > 0")
+    for k in ("XC", "YC", "ZC"):
+        if k not in df.columns:
+            raise KeyError(f'missing required column "{k}"')
+
+    # Views (compact dtypes)
+    x = df["XC"].to_numpy(dtype=np.float32, copy=False)
+    y = df["YC"].to_numpy(dtype=np.float32, copy=False)
+    z = df["ZC"].to_numpy(dtype=np.float32, copy=False)
+
+    xmin, xmax = float(np.nanmin(x)), float(np.nanmax(x))
+    ymin, ymax = float(np.nanmin(y)), float(np.nanmax(y))
+    zmin, zmax = float(np.nanmin(z)), float(np.nanmax(z))
+
+    # Build edges to match half-open [lo, hi) tiles used elsewhere
+    def build_edges(lo, hi, step):
+        edges = []
+        cur = lo
+        # keep final edge even if mostly empty to mirror previous behavior
+        while cur <= hi:
+            edges.append(cur)
+            cur += step
+        edges.append(edges[-1] + step)  # last "hi" edge
+        return np.array(edges, dtype=np.float32)
+
+    x_edges = build_edges(xmin, xmax, float(x_size))
+    y_edges = build_edges(ymin, ymax, float(y_size))
+    z_edges = build_edges(zmin, zmax, float(z_size))
+
+    nx = len(x_edges) - 1
+    ny = len(y_edges) - 1
+    nz = len(z_edges) - 1
+
+    # Bin each row into (ix, iy, iz). Clip to stay inside.
+    ix = np.floor((x - x_edges[0]) / (x_edges[1] - x_edges[0])).astype(np.int32)
+    iy = np.floor((y - y_edges[0]) / (y_edges[1] - y_edges[0])).astype(np.int32)
+    iz = np.floor((z - z_edges[0]) / (z_edges[1] - z_edges[0])).astype(np.int32)
+    np.clip(ix, 0, nx - 1, out=ix)
+    np.clip(iy, 0, ny - 1, out=iy)
+    np.clip(iz, 0, nz - 1, out=iz)
+
+    # Flatten tile index for efficient aggregation
+    flat = (ix * ny + iy) * nz + iz
+    n_tiles = nx * ny * nz
+
+    # Aggregate counts and sums per tile (int32 / float64 to keep precision in sums)
+    counts = np.zeros(n_tiles, dtype=np.int32)
+    sum_x  = np.zeros(n_tiles, dtype=np.float64)
+    sum_y  = np.zeros(n_tiles, dtype=np.float64)
+    sum_z  = np.zeros(n_tiles, dtype=np.float64)
+
+    np.add.at(counts, flat, 1)
+    np.add.at(sum_x, flat, x.astype(np.float64, copy=False))
+    np.add.at(sum_y, flat, y.astype(np.float64, copy=False))
+    np.add.at(sum_z, flat, z.astype(np.float64, copy=False))
+
+    # Reshape to 3D grids
+    counts3 = counts.reshape(nx, ny, nz)
+    sumx3   = sum_x.reshape(nx, ny, nz)
+    sumy3   = sum_y.reshape(nx, ny, nz)
+    sumz3   = sum_z.reshape(nx, ny, nz)
+
+    # Centroids for tiles with points
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cx3 = sumx3 / counts3
+        cy3 = sumy3 / counts3
+        cz3 = sumz3 / counts3
+
+    # Compute neighborhood radius in tile units (exact for aligned tiles)
+    rx = int(np.ceil(dist / (x_edges[1] - x_edges[0])))
+    ry = int(np.ceil(dist / (y_edges[1] - y_edges[0])))
+    rz = int(np.ceil(dist / (z_edges[1] - z_edges[0])))
+
+    # 3D summed-area table (integral volume) for O(1) rectangular sums
+    # pad with a leading zero plane for inclusive-exclusive sums
+    integ = counts3.cumsum(axis=0).cumsum(axis=1).cumsum(axis=2)
+    # Pad to shape (nx+1, ny+1, nz+1)
+    pad = np.zeros((nx + 1, ny + 1, nz + 1), dtype=np.int64)
+    pad[1:, 1:, 1:] = integ
+
+    # helper to query sum over [x0:x1], [y0:y1], [z0:z1] inclusive (tile indices)
+    def rect_sum(x0, x1, y0, y1, z0, z1):
+        # convert to +1 indexing for integral volume
+        x0p, x1p = x0, x1 + 1
+        y0p, y1p = y0, y1 + 1
+        z0p, z1p = z0, z1 + 1
+        return (
+            pad[x1p, y1p, z1p]
+            - pad[x0p, y1p, z1p]
+            - pad[x1p, y0p, z1p]
+            - pad[x1p, y1p, z0p]
+            + pad[x0p, y0p, z1p]
+            + pad[x0p, y1p, z0p]
+            + pad[x1p, y0p, z0p]
+            - pad[x0p, y0p, z0p]
+        )
+
+    # Build output rows
+    rows = []
+    tile_id = 0
+    for i in range(nx):
+        x_lo, x_hi = float(x_edges[i]), float(x_edges[i + 1])
+        for j in range(ny):
+            y_lo, y_hi = float(y_edges[j]), float(y_edges[j + 1])
+            for k in range(nz):
+                c = int(counts3[i, j, k])
+                if not keep_empty and c == 0:
+                    continue
+
+                # neighborhood bounds in tile space for expanded box
+                il = max(0, i - rx); ih = min(nx - 1, i + rx)
+                jl = max(0, j - ry); jh = min(ny - 1, j + ry)
+                kl = max(0, k - rz); kh = min(nz - 1, k + rz)
+                n_indexed = int(rect_sum(il, ih, jl, jh, kl, kh))
+
+                # Centroid for core (NaN if empty)
+                cx = float(cx3[i, j, k]) if c > 0 else np.nan
+                cy = float(cy3[i, j, k]) if c > 0 else np.nan
+                cz = float(cz3[i, j, k]) if c > 0 else np.nan
+
+                tile_id += 1
+                rows.append({
+                    "tile_id": tile_id,
+                    "ix": i, "iy": j, "iz": k,
+                    "x_lo": x_lo, "x_hi": x_hi,
+                    "y_lo": y_lo, "y_hi": y_hi,
+                    "z_lo": float(z_edges[k]), "z_hi": float(z_edges[k + 1]),
+                    "x_center": (x_lo + x_hi) * 0.5,
+                    "y_center": (y_lo + y_hi) * 0.5,
+                    "z_center": (z_edges[k] + z_edges[k + 1]) * 0.5,
+                    "cx": cx, "cy": cy, "cz": cz,
+                    "n_indexed": n_indexed,
+                    "n_smoothed": c,
+                })
+
+    return pd.DataFrame(rows)
+
+
+# If you prefer the lean version for stability:
+# from your_module import summarize_bands_xyz_lean as summarize_bands_xyz
+
+def _axis_step_estimate(vals: np.ndarray, q: float = 0.1) -> float:
+    """Robust estimate of native cell size along one axis."""
+    u = np.unique(vals.astype(np.float32, copy=False))
+    if u.size < 2:
+        return 1.0
+    d = np.diff(u)
+    d = d[d > 0]
+    if d.size == 0:
+        return 1.0
+    return float(np.quantile(d, q))
+
+def _range_estimate(vals: np.ndarray) -> float:
+    vmin = float(np.nanmin(vals))
+    vmax = float(np.nanmax(vals))
+    return max(1e-9, vmax - vmin)
+
+def find_max_cubic_tile_size(
+    df: pd.DataFrame,
+    max_dist: float,
+    limit_indexed: int = 100_000,
+    *,
+    summarize_fn = None,              # default: summarize_bands_xyz (or pass your lean version)
+    step_quantile: float = 0.1,       # how we estimate native cell step per axis
+    max_iters: int = 24,              # binary search iterations
+    keep_empty: bool = False,         # only used if your summarize_fn supports it
+    verbose: bool = False,
+):
+    """
+    Returns the largest tile size S to use for x_size=y_size=z_size in
+    suavizar_batched_xyz_multi_stable such that max(n_indexed) <= limit_indexed.
+
+    Parameters
+    ----------
+    df : DataFrame with XC, YC, ZC
+    max_dist : float
+        The overlap/search radius that defines expanded regions.
+    limit_indexed : int
+        Hard cap for the maximum 'n_indexed' allowed (default 100k).
+    summarize_fn : callable
+        Function like summarize_bands_xyz(df, dist, x_size, y_size, z_size)
+        that returns a DataFrame with an 'n_indexed' column. If None, we
+        assume you have summarize_bands_xyz in scope.
+    step_quantile : float
+        Quantile used to estimate native cell spacing from unique coordinate diffs.
+    max_iters : int
+        Max binary search iterations.
+    keep_empty : bool
+        Passed through if your summarize supports it (ignored otherwise).
+    verbose : bool
+        Print progress.
+
+    Returns
+    -------
+    size : float
+        The largest cubic tile size S satisfying the constraint.
+    stats : dict
+        Useful diagnostics: {'max_indexed': int, 'summary_rows': int, 'low': float, 'high': float, 'iters': int}
+    """
+    if summarize_fn is None:
+        # fall back to a name in scope; replace if yours has a different name
+        summarize_fn = summarize_bands_xyz
+
+    for k in ("XC", "YC", "ZC"):
+        if k not in df.columns:
+            raise KeyError(f'missing required column "{k}"')
+
+    x = df["XC"].to_numpy(dtype=np.float32, copy=False)
+    y = df["YC"].to_numpy(dtype=np.float32, copy=False)
+    z = df["ZC"].to_numpy(dtype=np.float32, copy=False)
+
+    # --- establish search bounds for cubic tile size S ---
+    # lower bound: “native” cell size (use the max of axis estimates so S covers at least ~1 cell)
+    dx = _axis_step_estimate(x, q=step_quantile)
+    dy = _axis_step_estimate(y, q=step_quantile)
+    dz = _axis_step_estimate(z, q=step_quantile)
+    low = max(dx, dy, dz, 1e-6)
+
+    # upper bound: span of the largest axis (one giant tile)
+    rx = _range_estimate(x)
+    ry = _range_estimate(y)
+    rz = _range_estimate(z)
+    high = max(rx, ry, rz)
+
+    # guard: if even a huge tile is under the limit, return high
+    def max_indexed_for(size: float) -> tuple[int, int]:
+        # Some summarize variants accept keep_empty; try to pass it if available.
+        try:
+            summary = summarize_fn(df, dist=max_dist, x_size=size, y_size=size, z_size=size, keep_empty=keep_empty)
+        except TypeError:
+            summary = summarize_fn(df, dist=max_dist, x_size=size, y_size=size, z_size=size)
+        mx = int(summary["n_indexed"].max()) if len(summary) else 0
+        return mx, len(summary)
+
+    # Binary search assumes monotonic non-decreasing max(n_indexed) as size grows (true in practice).
+    # First, check the bounds:
+    mx_low, _ = max_indexed_for(low)
+    mx_high, _ = max_indexed_for(high)
+
+    if verbose:
+        print(f"[init] low={low:.6g} -> max_indexed={mx_low}, high={high:.6g} -> max_indexed={mx_high}")
+
+    # If even the smallest tile exceeds the limit, we can't meet the constraint with cubic tiles.
+    if mx_low > limit_indexed:
+        return None, {"reason": "min_size_exceeds_limit", "max_indexed": mx_low, "low": low, "high": high, "iters": 0}
+
+    # If largest tile still within limit, take it.
+    if mx_high <= limit_indexed:
+        return float(high), {"max_indexed": mx_high, "low": low, "high": high, "iters": 0}
+
+    # Binary search
+    iters = 0
+    best = low
+    best_mx = mx_low
+    for _ in range(max_iters):
+        iters += 1
+        mid = (low + high) * 0.5
+        mx_mid, _ = max_indexed_for(mid)
+        if verbose:
+            print(f"[{iters}] size={mid:.6g} -> max_indexed={mx_mid}")
+
+        if mx_mid <= limit_indexed:
+            best = mid
+            best_mx = mx_mid
+            low = mid  # try bigger
+        else:
+            high = mid # need smaller
+
+        # early exit if interval is tiny
+        if (high - low) / max(high, 1e-9) < 1e-3:
+            break
+
+    return float(best), {"max_indexed": int(best_mx), "low": low, "high": high, "iters": iters}
+
+
