@@ -59,8 +59,53 @@ function delete_file_if_exists(path){
   try{ if (FSO.FileExists(path)) { FSO.DeleteFile(path, true); } } catch(e){}
 }
 
+function _normalizePath(p) {
+  p = String(p || "");
+  // strip quotes
+  p = p.replace(/["']/g, "");
+  // use backslashes, collapse repeats
+  p = p.replace(/\//g, "\\").replace(/\\+/g, "\\");
+  // remove trailing slash except for roots (C:\ or \\server\share)
+  if (/^\\\\/.test(p)) {
+    // UNC: keep \\server\share root; trim only extra trailing slash
+    if (!/^\\\\[^\\]+\\[^\\]+\\?$/.test(p)) p = p.replace(/\\$/, "");
+  } else {
+    if (!/^[A-Za-z]:\\?$/.test(p)) p = p.replace(/\\$/, "");
+  }
+  return p;
+}
+
+/**
+ * Creates folder (and parents) if missing. Returns true on success.
+ * Throws with a readable error message if something goes wrong.
+ */
+function ensureFolder(folderPath) {
+  var path = _normalizePath(folderPath);
+
+  // already exists
+  if (FSO.FolderExists(path)) return true;
+
+  // // ensure parent first
+  // var parent = FSO.GetParentFolderName(path);
+  // if (parent && !FSO.FolderExists(parent)) {
+  //   ensureFolder(parent);
+  // }
+
+  // create this folder
+  try {
+    FSO.CreateFolder(path);
+    return true;
+  } catch (e) {
+    throw new Error("Failed to create folder: " + path + "\n" + (e && e.message ? e.message : e));
+  }
+}
+
 // -------- core runners --------
 function run_cmd(command){
+
+  // Make ensure that TEMP_FOLDER exists
+  ensureFolder(TEMP_FOLDER);
+
   // Always use fresh error file to avoid locking issues
   var stamp = nowStamp();
   var outPath   = TEMP_FOLDER + "\\OUTPUT.txt";
