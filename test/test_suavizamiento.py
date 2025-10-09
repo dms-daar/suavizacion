@@ -187,3 +187,50 @@ def test_suavizar_batched_xyz_multi_stable_1(oDmApp):
 
     assert res, f"Error"
 
+
+def test_suavizar_batched_xyz_multi_stable_2(oDmApp): 
+
+    table = "mb_final_smooth_r3a"
+    col = "CATE"
+    out_col = f"{col}_SUAV"
+
+    df10 = get_dm_table(table, oDmApp)
+    df20 = df10.copy()
+    dfm = df10.copy()
+
+    suavizar_col(df10, col, 10, out_col)
+    suavizar_col(df20, col, 20, out_col)
+
+    dists = [10, 20]
+    out_cols = [f"{out_col}_{d}" for d in dists]
+
+    max_dist = max(dists)
+
+    size, stats = find_max_cubic_tile_size(
+        df=dfm,
+        max_dist=max_dist,
+        limit_indexed=50_000,
+        summarize_fn=summarize_bands_xyz_lean,   # or summarize_bands_xyz_lean
+        verbose=True
+    )
+
+    suavizar_batched_xyz_multi_stable(
+        dfm, col, dists, out_cols, 
+        x_size=size, y_size=size, z_size=size
+    )
+
+    res, _ = series_equal_with_tolerance(
+        dfm[f"{out_col}_10"], 
+        df10[out_col], 
+        max_diff_pct=0.1 # 1=1% 0.1=0.1%
+    )
+
+    assert res, f"Error"
+
+    res, _ = series_equal_with_tolerance(
+        dfm[f"{out_col}_20"], 
+        df20[out_col], 
+        max_diff_pct=0.1 # 1=1% 0.1=0.1%
+    )
+
+    assert res, f"Error"
