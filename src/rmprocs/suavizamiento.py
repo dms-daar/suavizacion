@@ -797,6 +797,37 @@ def report_volume_variation(bm, ton, col, out_col):
     return res2
 
 
+def reportar_volumenes(bm, col, dists, out_cols): 
+
+    distancias = [0] + dists
+    columns = [col] + out_cols
+    df = None
+
+    for idx, (c, d) in enumerate(zip(columns, distancias), 0):
+
+        res = bm.groupby(c).agg({"VOL": "sum"})
+        res = res / res.sum() * 100
+
+        res.index.name = col
+
+        if d == 0: 
+            res = res.rename(columns={"VOL": "ORIG"})
+        else: 
+            res = res.rename(columns={"VOL": f"SUAV_{d}"})
+        
+        if idx == 0: df = res
+        else: df = df.join(res, how="outer")
+
+    
+    dff = df.copy() 
+    dff = dff.applymap(lambda x: f"{x:.2f}%")
+    dff = dff.reset_index()
+
+    df = df.reset_index()
+
+    return df, dff
+
+
 def df_to_json_table(df, percent_cols=None, float_ndigits=1):
     """
     Returns a dict like:
