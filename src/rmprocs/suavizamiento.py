@@ -1042,9 +1042,6 @@ def summarize_bands_xyz_lean(
     return pd.DataFrame(rows)
 
 
-# If you prefer the lean version for stability:
-# from your_module import summarize_bands_xyz_lean as summarize_bands_xyz
-
 def _axis_step_estimate(vals: np.ndarray, q: float = 0.1) -> float:
     """Robust estimate of native cell size along one axis."""
     u = np.unique(vals.astype(np.float32, copy=False))
@@ -1056,17 +1053,19 @@ def _axis_step_estimate(vals: np.ndarray, q: float = 0.1) -> float:
         return 1.0
     return float(np.quantile(d, q))
 
+
 def _range_estimate(vals: np.ndarray) -> float:
     vmin = float(np.nanmin(vals))
     vmax = float(np.nanmax(vals))
     return max(1e-9, vmax - vmin)
+
 
 def find_max_cubic_tile_size(
     df: pd.DataFrame,
     max_dist: float,
     limit_indexed: int = 100_000,
     *,
-    summarize_fn = None,              # default: summarize_bands_xyz (or pass your lean version)
+    summarize_fn = None,            
     step_quantile: float = 0.1,       # how we estimate native cell step per axis
     max_iters: int = 24,              # binary search iterations
     keep_empty: bool = False,         # only used if your summarize_fn supports it
@@ -1103,9 +1102,6 @@ def find_max_cubic_tile_size(
     stats : dict
         Useful diagnostics: {'max_indexed': int, 'summary_rows': int, 'low': float, 'high': float, 'iters': int}
     """
-    if summarize_fn is None:
-        # fall back to a name in scope; replace if yours has a different name
-        summarize_fn = summarize_bands_xyz
 
     for k in ("XC", "YC", "ZC"):
         if k not in df.columns:
@@ -1177,5 +1173,4 @@ def find_max_cubic_tile_size(
             break
 
     return float(best), {"max_indexed": int(best_mx), "low": low, "high": high, "iters": iters}
-
 
