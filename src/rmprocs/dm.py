@@ -42,7 +42,8 @@ def get_oDmApp(app="StudioRM"):
     return oDmApp, PROJECT_FOLDER
 
 
-def get_dm_table(table, oDmApp):
+def get_dm_table(table, oDmApp, columns=None):
+
     project_folder = oDmApp.ActiveProject.Folder
     table_path = os.path.join(project_folder, f"{table}{DMEXT}")
     assert os.path.exists(table_path), f"Table {table}{DMEXT} does not exist"
@@ -54,9 +55,22 @@ def get_dm_table(table, oDmApp):
     path = os.path.join(temp_dir, f"temp0_{ts}.csv")
 
     try:
-        # Export to CSV
-        command = f"output &IN={table} @CSV=1 @NODD=0 @DPLACE=-1 @IMPLICIT=1 '{path}'"
-        oDmApp.ParseCommand(command)
+
+        if columns is not None: 
+            col_sel = [f"*F{i}={col}" for i, col in enumerate(columns, 1)]
+            col_sel = " ".join(col_sel)
+            command = f"SELCOP &IN={table} &OUT=xxx_{ts} {col_sel}"
+            oDmApp.parseCommand(command)
+            # Export to CSV
+            command = f"output &IN=xxx_{ts} @CSV=1 @NODD=0 @DPLACE=-1 @IMPLICIT=1 '{path}'"
+            oDmApp.ParseCommand(command)
+            oDmApp.ParseCommand(f"DELETE &IN=xxx_{ts}")
+
+
+        else: 
+            # Export to CSV
+            command = f"output &IN={table} @CSV=1 @NODD=0 @DPLACE=-1 @IMPLICIT=1 '{path}'"
+            oDmApp.ParseCommand(command)
 
         # Read and return
         df = pd.read_csv(path, encoding="1252")
@@ -129,7 +143,6 @@ def save_df_as_table(df, table, oDmApp):
             pass
 
 
-
 def load_3d(table, oDmApp, template=None):
 
     objVR = oDmApp.ActiveProject.VR
@@ -149,3 +162,24 @@ def load_3d(table, oDmApp, template=None):
 
     # retornar el objeto cargado a la ventana 3D
     return object
+
+
+def add_cols(table, df, out, oDmApp): 
+
+    # make a copy of the table
+    command = f"EXTRA &IN={table} &OUT=xxx1 'GO'"
+    oDmApp.parseCommand(command)
+
+    # save the df
+    save_df_as_table(df, "xxx2", oDmApp)
+
+    # splat
+    command = f"SPLAT &IN1=xxx1 &IN2=xxx2 &out={out}"
+    oDmApp.parseCommand(command)
+
+    # delete temp files
+    command = "DELETE &IN=xxx1"
+    oDmApp.parseCommand(command)
+
+    command = "DELETE &IN=xxx2"
+    oDmApp.parseCommand(command)
